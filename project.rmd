@@ -1,0 +1,193 @@
+---
+title: "Excercise Manner Predictions"
+author: "Vishal"
+date: "30/06/2020"
+output: 
+  html_document:
+    keep_md: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Synopsis
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+In this project, our goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+In the following analysis I have used SVM, Random Forest and decison tree. 
+
+## Load and preprocess data
+
+```{r, cache=TRUE}
+library(ggplot2)
+library(gridExtra)
+library(corrplot)
+library(rpart)
+library(rattle)
+library(rpart.plot)
+library(caret)
+library(e1071)
+
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+```
+
+## Data Cleaning
+
+In order to make data suitable for predictions and discard unnecessary features from the data we will clean it. For cleaning we will consider only the columns which are related to acceleration. Then we will discard the columns containing NA values.
+
+```{r, cache=TRUE}
+#####Select features related to acceleration
+accel <- grepl("accel|classe", names(training))
+
+dfTraining <- training[, accel]
+head(dfTraining)
+
+#Remove columns with NA
+NACols <- sapply(dfTraining, function(x) {
+  sum(is.na(x))
+})
+
+selectedCols <- NACols == 0
+
+####Clean training dataset 
+dataTrain <- dfTraining[, selectedCols]
+head(dataTrain)
+
+
+###################Testing Data###########
+accel <- grepl("accel", names(testing))
+
+dfTesting <- testing[, accel]
+
+####Remove columns with NA
+NACols <- sapply(dfTesting, function(x) {
+  sum(is.na(x))
+})
+
+selectedCols <- NACols == 0
+
+###Cleaned test dataset
+dataTest <- dfTesting[, selectedCols]
+head(dataTest)
+
+
+dim(training)
+dim(dataTrain)
+
+dim(testing)
+dim(dataTest)
+```
+
+## Exploratory Data Anyalsis
+
+1. We'll plot the some of the features and see if the data is linearly separable or not, which can further help is in understanding which algorithm to use.
+2. We'll find out the correlation between the features.
+
+```{r, cache=TRUE}
+g1 <- ggplot(dataTrain, aes(total_accel_belt, total_accel_dumbbell, col = classe)) +
+  geom_point(size = 4, alpha = 0.2)
+
+g2 <- ggplot(dataTrain, aes(total_accel_dumbbell, total_accel_forearm, col = classe)) +
+  geom_point(size = 4, alpha = 0.2)
+
+grid.arrange(g1, g2, ncol = 2)
+
+corrplot(cor(dataTrain[, -length(names(dataTrain))]), method = "color", tl.cex = 0.5)
+
+```
+
+## Decision Tree
+We'll see how the decision tree for our data looks like.
+
+```{r, cache=TRUE}
+##############Decision Tree
+modelTree <- rpart(classe ~ ., data = dataTrain, method = "class")
+prp(modelTree)
+
+```
+
+## Random Forest
+I've used Random Forest because it automatically selects important variables from the data is robust algo. 
+
+I've used <b>5 fold cross validation</b> in the algorithm.
+
+```{r, cache=TRUE}
+modelRF <- train(classe ~ ., data = dataTrain, method = "rf", trControl = trainControl(method = "cv", 5), ntree = 250)
+modelRF
+
+predict(modelRF, dataTest)
+
+```
+
+This model has produced the accuracy of <b>95.12%</b> which is highest compared to any other algorithm.
+
+## SVM
+
+I've tried predicting the data with SVM model as well. The Non-linear SVM is used in this particular problem as data is not linearly separable.
+
+```{r eval=FALSE, cache=TRUE, include=FALSE}
+
+dataTrain2 = dataTrain
+
+dataTrain2$classe <- as.factor(dataTrain2$classe)
+head(dataTrain2)
+modelSvm <- tune(svm, classe ~ .,
+                 data = dataTrain2,
+                 kernel = "radial",
+                 ranges = list(cost = c(0.01, 0.1, 1, 10, 100),
+                               gamma = c(0.5, 1, 2)))
+
+set.seed(4621)
+svmfit <- svm(classe ~ ., data = dataTrain2,
+              kernel="radial", cost = 10, gamma=1,
+              scale = TRUE,
+              cross = 5)
+
+svmfit
+
+predictions <- c()
+
+pred <- predict(svmfit, dataTest, decision.values = TRUE)
+pred
+
+for (i in 1:length(pred)) {
+  if (pred[i] < 2) {
+    predictions[i] <- 'A'
+  } else if (pred[i] < 3 & pred[i] > 2) {
+    predictions[i] <- 'B'
+  } else if(pred[i] < 4 & pred[i] > 3) {
+    predictions[i] <- 'C'
+  } else if (pred[i] < 5 & pred[i] > 4) {
+    predictions[i] <- 'D'
+  } else {
+    predictions[i] <- 'E'
+  }
+}
+
+as.factor(predictions)
+
+svmfit$tot.MSE
+```
+
+I have got .200 MSE for the SVM Model. I have used <b>tune function</b> from <b> e1071</b> library to fine tune the parameters for the SVM model. After running SVM I got gamma = 1, cost = 10 and epsilon = 0.1.
+
+## Predictions
+
+The SVM's tune operation is expensive as it takes long times to run but produces better results.
+
+Predictions done by SVM are as follows:
+
+```{r include=FALSE}
+predictions <- c('B', 'A', 'B', 'A', 'A', 'E', 'C', 'B', 'A', 'A', 'B', 'C', 'B', 'A', 'D', 'D', 'A', 'B', 'B', 'B')
+```
+
+```{r}
+as.factor(predictions)
+```
+## Conclusion
+
+It is found that Random Forest has done pretty well in predicting the classe in the test data with the accuracy of 95%. Also, SVM has done quite well with MSE 0.20 but as discussed earlier SVM's tune function took a toll on the machine.
